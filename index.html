@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HTML Glossary Term Processor</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        textarea {
+            width: 100%;
+            min-height: 300px;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+        .output {
+            border: 1px solid #ccc;
+            padding: 20px;
+            border-radius: 4px;
+            background: #f9f9f9;
+            margin-top: 20px;
+        }
+        .preview {
+            border: 1px solid #ccc;
+            padding: 20px;
+            border-radius: 4px;
+            background: white;
+            margin-top: 10px;
+        }
+        button {
+            background: #0066cc;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background: #0052a3;
+        }
+        .file-input {
+            margin: 10px 0;
+        }
+        .instructions {
+            background: #e6f3ff;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>HTML Glossary Term Processor</h1>
+    
+    <div class="instructions">
+        <h3>Instructions:</h3>
+        <ol>
+            <li>Upload or paste your glossary CSV (format: term,definition)</li>
+            <li>Upload or paste your HTML content</li>
+            <li>Click "Process Content" to add hover definitions</li>
+            <li>Copy the processed HTML or view the live preview</li>
+        </ol>
+    </div>
+
+    <div class="container">
+        <div>
+            <h2>Glossary CSV</h2>
+            <div class="file-input">
+                <input type="file" id="csvFile" accept=".csv" />
+            </div>
+            <textarea id="csvInput" placeholder="Or paste CSV content here...
+Example:
+term,definition
+phonics,An approach to teaching reading...
+fluency,The ability to act with ease..."></textarea>
+        </div>
+
+        <div>
+            <h2>HTML Content</h2>
+            <div class="file-input">
+                <input type="file" id="htmlFile" accept=".html,.htm" />
+            </div>
+            <textarea id="htmlInput" placeholder="Or paste HTML content here..."></textarea>
+        </div>
+    </div>
+
+    <button onclick="processContent()">Process Content</button>
+
+    <div class="output">
+        <h2>Processed HTML</h2>
+        <textarea id="output" readonly></textarea>
+        <h3>Live Preview</h3>
+        <div id="preview" class="preview"></div>
+    </div>
+
+    <script>
+        // Handle file uploads
+        document.getElementById('csvFile').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                document.getElementById('csvInput').value = e.target.result;
+            };
+            reader.readAsText(file);
+        });
+
+        document.getElementById('htmlFile').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                document.getElementById('htmlInput').value = e.target.result;
+            };
+            reader.readAsText(file);
+        });
+
+        function parseCSV(csv) {
+            const glossary = new Map();
+            const lines = csv.split('\n');
+            
+            for (let line of lines) {
+                // Skip empty lines
+                if (!line.trim()) continue;
+                
+                // Handle quoted fields
+                let [term, definition] = line.split(',').map(field => {
+                    field = field.trim();
+                    // Remove quotes if present
+                    if (field.startsWith('"') && field.endsWith('"')) {
+                        field = field.slice(1, -1);
+                    }
+                    return field;
+                });
+
+                if (term && definition) {
+                    glossary.set(term.toLowerCase(), definition);
+                }
+            }
+            
+            return glossary;
+        }
+
+        function processContent() {
+            const csvContent = document.getElementById('csvInput').value;
+            const htmlContent = document.getElementById('htmlInput').value;
+            
+            if (!csvContent || !htmlContent) {
+                alert('Please provide both CSV and HTML content');
+                return;
+            }
+
+            const glossary = parseCSV(csvContent);
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(htmlContent, 'text/html');
+            const termsProcessed = new Set();
+
+            // Process text nodes
+            const walker = document.createTreeWalker(
+                doc.body,
+                NodeFilter.SHOW_TEXT,
+                {
+                    acceptNode: function(node) {
+                        if (node.parentElement.tagName === 'SCRIPT' ||
+                            node.parentElement.tagName === 'STYLE' ||
+                            node.parentElement.tagName === 'ABBR') {
+                            return NodeFilter.FILTER_REJECT;
+                        }
+                        return NodeFilter.FILTER_ACCEPT;
+                    }
+                }
+            );
+
+            const nodesToProcess = [];
+            while (walker.nextNode()) nodesToProcess.push(walker.currentNode);
+
+            for (let textNode of nodesToProcess) {
+                let text = textNode.textContent;
+                let newHTML = text;
+
+                for (let [term, definition] of glossary) {
+                    if (termsProcessed.has(term)) continue;
+
+                    const regex = new RegExp(`\\b${term}\\b`, 'i');
+                    const match = text.match(regex);
+                    
+                    if (match) {
+                        const matchedText = match[0];
+                        newHTML = newHTML.replace(
+                            matchedText,
+                            `<abbr title="${definition}">${matchedText}</abbr>`
+                        );
+                        termsProcessed.add(term);
+                    }
+                }
+
+                if (newHTML !== text) {
+                    const span = doc.createElement('span');
+                    span.innerHTML = newHTML;
+                    textNode.parentNode.replaceChild(span, textNode);
+                }
+            }
+
+            const output = doc.body.innerHTML;
+            document.getElementById('output').value = output;
+            document.getElementById('preview').innerHTML = output;
+        }
+    </script>
+</body>
+</html>
